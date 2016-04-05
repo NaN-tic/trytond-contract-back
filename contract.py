@@ -9,6 +9,7 @@ from sql.conditionals import Case
 from sql.aggregate import Max, Min, Sum
 from decimal import Decimal
 
+from trytond import backend
 from trytond.model import Workflow, ModelSQL, ModelView, Model, fields
 from trytond.pool import Pool
 from trytond.pyson import Eval, Bool, If
@@ -160,6 +161,34 @@ class Contract(RRuleMixin, Workflow, ModelSQL, ModelView):
                     'icon': 'tryton-cancel',
                     },
                 })
+
+    @classmethod
+    def __register__(cls, module_name):
+        TableHandler = backend.get('TableHandler')
+        cursor = Transaction().cursor
+        table = TableHandler(cursor, cls, module_name)
+        Line = Pool().get('contract.line')
+        line_table = TableHandler(cursor, Line, module_name)
+
+        sql_table = cls.__table__()
+        line = Line.__table__()
+
+        first_invoice_date_exist = table.column_exist('first_invoice_date')
+
+        super(Contract, cls).__register__(module_name)
+
+        # Move first_invoice_date field from line into contract
+        if (not first_invoice_date_exist and
+                line_table.column_exist('first_invoice_date')):
+            query = sql_table.update(
+                [sql_table.first_invoice_date],
+                line.select(
+                    Min(line.first_invoice_date),
+                    where=sql_table.id == line.contract,
+                    group_by=line.contract))
+
+            cursor.execute(*query)
+            line_table.drop_column('first_invoice_date')
 
     def _get_rec_name(self, name):
         rec_name = []
